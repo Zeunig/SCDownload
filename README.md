@@ -15,7 +15,7 @@ scdownload playlist zeunig/sets/hardstyle
 - Artist, cover, title parsing
 - Track/album/playlist support
 - Easy to use
-- 3 dependencies only
+- 4 dependencies only
 - Made in Rust
 
 ## Contact
