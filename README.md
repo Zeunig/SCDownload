@@ -15,5 +15,5 @@ scdownload playlist zeunig/sets/hardstyle
 - Made in Rust
 
 ## Contact
-![Discord server](https://discord.gg/pJVxS6uRTK)<br />
-![Website](https://zeunig.hu)
+[Discord server](https://discord.gg/pJVxS6uRTK)<br />
+[Website](https://zeunig.hu)
