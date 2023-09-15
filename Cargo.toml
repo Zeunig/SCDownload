@@ -1,0 +1,12 @@
+[package]
+name = "scdownload"
+version = "0.1.0"
+edition = "2021"
+authors = ["Bence <business@mail.zeunig.hu>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+id3 = "1.7.0"
+regex = "1.9.5"
+reqwest = {version="0.11.20",features = ["rustls-tls","blocking"]}
