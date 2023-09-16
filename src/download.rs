@@ -249,7 +249,7 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
                     let link = &link[0];
                     let r = req.get(link).send().unwrap().bytes().unwrap();
                     let mut a = temp_dir.clone();
-                    a.push(format!("audio{}.mp3",audio_file_nmbr_count));
+                    a.push(format!("{}.mp3",audio_file_nmbr_count));
                     let mut file = OpenOptions::new().write(true).create(true).open(a).unwrap();
                     let a = file.write_all(&r);
                     match a {
@@ -270,44 +270,59 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
     let mut audio = 0;
     while audio < audio_file_nmbr_count {
         let mut a = temp_dir.clone();
-        a.push(format!("audio{}.mp3", audio));
+        a.push(format!("{}.mp3", audio));
         arguments.push(a.to_str().unwrap().to_string());
         audio = audio + 1;
     }
     
-    let mut command = Command::new("mp3cat")
+    let command = Command::new("mp3cat")
     //.arg(download_dir.to_str().unwrap())
-    .args(arguments)
+    .args(&arguments)
     .arg("-o")
     .arg(download_dir.to_str().unwrap())
     .arg("-q")
     .arg("-f")
-    .spawn().expect("Failed to execute cmd message");
-    match command.wait() {
-        Ok(_) => {
-            let mut tag: Tag = match Tag::read_from_path(download_dir.to_str().unwrap()) {
-                Ok(tag) => tag,
-                Err(id3::Error{kind: id3::ErrorKind::NoTag, ..}) => Tag::new(),
-                Err(_) => return,
-            };
-            // add cover image, artist etc. to song
-            tag.set_title(song_name);
-            tag.set_album_artist(&artist);
-            tag.set_artist(artist);
-            // Every album must be unique, because of Spotify's weird optimization(?) of using one image for the album
-            tag.set_album(&song);
-            let mut cover_image = temp_dir.clone(); cover_image.push("cover.jpg");
-            tag.add_frame(id3::frame::Picture { 
-                mime_type: String::from("image/jpeg"), 
-                picture_type: id3::frame::PictureType::Media,
-                description: String::new(),
-                data: std::fs::read(cover_image).unwrap()
-            });
-            let _ = tag.write_to_path(download_dir.to_str().unwrap(), Version::Id3v23);
+    .spawn();//.expect("Failed to execute cmd message");
+    println!("{:?}",download_dir);
+    match command {
+        Ok(mut child) => {
+            match child.wait() {
+                Ok(_) => {
+                    let mut tag: Tag = match Tag::read_from_path(download_dir.to_str().unwrap()) {
+                        Ok(tag) => tag,
+                        Err(id3::Error{kind: id3::ErrorKind::NoTag, ..}) => Tag::new(),
+                        Err(_) => return,
+                    };
+                    // add cover image, artist etc. to song
+                    tag.set_title(song_name);
+                    tag.set_album_artist(&artist);
+                    tag.set_artist(artist);
+                    // Every album must be unique, because of Spotify's weird optimization(?) of using one image for the album
+                    tag.set_album(&song);
+                    let mut cover_image = temp_dir.clone(); cover_image.push("cover.jpg");
+                    tag.add_frame(id3::frame::Picture { 
+                        mime_type: String::from("image/jpeg"), 
+                        picture_type: id3::frame::PictureType::Media,
+                        description: String::new(),
+                        data: std::fs::read(cover_image).unwrap()
+                    });
+                    let _ = tag.write_to_path(download_dir.to_str().unwrap(), Version::Id3v23);
+                },
+                Err(_) => {
+                    logging(Severities::WARNING, "Error occured while running command, skipping ID3 tags");
+                }
+            } 
         },
-        Err(_) => {
-            logging(Severities::WARNING, "Error occured while running command, skipping ID3 tags");
+        Err(err) => {
+            println!("{}",err.to_string());
+            if err.to_string().contains("The filename or extension is too long") {
+                logging(Severities::CRITICAL, "Song too long");
+            } else {
+                logging(Severities::CRITICAL, format!("Failed to execute cmd message, please contact the developer with this message : {:?}",err));
+                return;
+            }
         }
-    } 
+    }
+    
     logging(Severities::INFO, format!("Finished downloading {}",song));
 }
