@@ -60,7 +60,6 @@ pub fn prepare_download(songs: Vec<String>, temp_dir: &mut PathBuf, download_dir
             if GLOBAL_THREAD_COUNT.load(Ordering::SeqCst) >= max_threads.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(50));
             } else {
-                thread::sleep(Duration::from_secs(1));
                 let req_wrapped = Arc::new(Mutex::new(req.clone()));
                 let song_wrapped = Arc::new(Mutex::new(song.clone()));
                 let temp_dir_wrapped = Arc::new(Mutex::new(temp_dir.clone()));
@@ -82,7 +81,6 @@ pub fn prepare_download(songs: Vec<String>, temp_dir: &mut PathBuf, download_dir
                 
             }
         }
-        
     }
     while GLOBAL_THREAD_COUNT.load(Ordering::Relaxed) >= 1 {
         thread::sleep(Duration::from_secs(1));
@@ -127,7 +125,7 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
             println!("Failed to create directory, additional information : {}",err);
         }
     }
-    let mut temp = temp_dir.clone();temp.push("audio0.mp3");
+    let mut temp = temp_dir.clone();temp.push("0.mp3");
     let mut cover_path = temp_dir.clone();cover_path.push("cover.jpg");
     #[allow(unused_assignments)]
     let mut artist: String = String::new();
@@ -206,6 +204,11 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
                     String::from("None")
                 }
             };
+        {
+            let mut temp = temp_dir.clone();temp.push("metadata.txt");
+            let mut file = OpenOptions::new().write(true).create(true).open(temp).unwrap();
+            let _ = file.write_all(format!("{}|{}|{}",artist,song_name,&cover).as_bytes());
+        }
         if !cover_path.exists() {
             let re = req.get(&cover).send().unwrap().bytes().unwrap();
             {
@@ -222,6 +225,7 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
                 let _ = file.write_all(&r);
             }
         }
+        
         let re = Regex::new(r#"track_authorization":"(.*?)""#).unwrap();
         let capture = re.captures(&r).unwrap();
         if let Some(track_auth) = capture.get(1) {
@@ -283,7 +287,6 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
     .arg("-q")
     .arg("-f")
     .spawn();//.expect("Failed to execute cmd message");
-    println!("{:?}",download_dir);
     match command {
         Ok(mut child) => {
             match child.wait() {
