@@ -9,25 +9,21 @@ mod logging;
 fn additional_argument_helper(args: &Vec<String>) -> (PathBuf,PathBuf) {
     let mut temp_dir: PathBuf = env::temp_dir();
     let mut download_dir: PathBuf = Path::new("./").to_path_buf();
-    if args.len() >= 3 {
-        if let Some(firsthelp) = args.get(3) {
-            if firsthelp.contains("temp-dir") {
-                if let Some(equal) = firsthelp.find("=") {
-                    temp_dir = PathBuf::from(&firsthelp[equal+1..]);
-                    if !(Path::is_dir(Path::new(&temp_dir))) {
-                        println!(r#"Invalid temp_dir, using default option"#);temp_dir = env::temp_dir();
-                    }
-                }
-            }else if firsthelp.contains("download-dir") {
-                if let Some(equal) = firsthelp.find("=") {
-                    download_dir = PathBuf::from(&firsthelp[equal+1..]);
-                    if !(Path::is_dir(Path::new(&download_dir))) {
-                        println!(r#"Invalid download_dir, using default option"#);download_dir = Path::new("./").to_path_buf();
-                    }
-                }
+    if let Some(tempdir_argument) = args.iter().find(|&x| x.contains("--temp-dir")) {
+        if let Some(equal) = tempdir_argument.find("=") {
+            temp_dir = PathBuf::from(&tempdir_argument[equal+1..]);
+            if !(Path::is_dir(Path::new(&temp_dir))) {
+                println!(r#"Invalid temp_dir, using default option"#);temp_dir = env::temp_dir();
             }
         }
-        
+    }
+    if let Some(downloadir_argument) = args.iter().find(|&x| x.contains("--download-dir")) {
+        if let Some(equal) = downloadir_argument.find("=") {
+            download_dir = PathBuf::from(&downloadir_argument[equal+1..]);
+            if !(Path::is_dir(Path::new(&download_dir))) {
+                println!(r#"Invalid download_dir, using default option"#);download_dir = Path::new("./").to_path_buf();
+            }
+        }
     }
     (temp_dir,download_dir)
 }
@@ -138,15 +134,30 @@ fn main() {
     check_for_invalid_arguments(&args);
     let mut paths = additional_argument_helper(&args);
     paths.0.push("SCDownloader");
+    // We're safe the unwrap the args because we checked if the argument list of valid
     match args.get(1).unwrap().as_str() {
         "track" => {
+            let mut arg2 = args.get(2).unwrap().to_owned();
+            if arg2.contains("soundcloud.com/") {
+                let p: Vec<&str> = arg2.split("soundcloud.com/").collect();
+                arg2 = p[1].to_string();
+            }
+            {
+                let p: Vec<&str> = arg2.split("?").collect(); // we don't need anything after the ?
+                arg2 = p[0].to_string();
+            }
             let mut list: Vec<String> = Vec::new();
-            list.push(trimming(args.get(2).unwrap().to_owned()));
+            list.push(trimming(arg2));
             prepare_download(list, &mut paths.0, &mut paths.1, 1, true);
         },
-        "playlist" => {
+        "playlist" | "album" => {
+            let mut arg2 = args.get(2).unwrap().to_owned();
+            if args.get(2).unwrap().contains("https://soundcloud.com/") {
+                let p: Vec<&str> = arg2.split("https://soundcloud.com/").collect();
+                arg2 = p[1].to_string();
+            }
             logging(logging::Severities::INFO, "Fetching playlist");
-            paths.1.push(format!("{}",args.get(2).unwrap()));
+            paths.1.push(format!("{}",arg2));
             use reqwest::header::HeaderMap;
             use regex::Regex;
             let mut list: Vec<String> = Vec::new();
@@ -167,7 +178,7 @@ fn main() {
             headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
             headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
             let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
-            let r = req.get(format!("https://soundcloud.com/{}", args.get(2).unwrap())).send().unwrap().text().unwrap();
+            let r = req.get(format!("https://soundcloud.com/{}", arg2)).send().unwrap().text().unwrap();
             let reg = Regex::new(r#""id":([0-9]*?),"kind":"track","#).unwrap();
             for a in reg.captures_iter(&r).map(|c| c.get(1)) {
                 match a {
@@ -179,7 +190,7 @@ fn main() {
             }
             let mut songs: Vec<String> = Vec::new();
             playlist_to_vec(req, &mut songs, list);
-            prepare_download(songs, &mut paths.0, &mut paths.1, 10, false);
+            prepare_download(songs, &mut paths.0, &mut paths.1, 3, false);
         }
         _ => {
             exit(0);
