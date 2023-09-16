@@ -60,6 +60,13 @@ example: ossianofficial/sets/best-of-1998-2008"#);exit(0);
 Invalid usage, expected playlist ID:
 example: zeunig/sets/hardstyle"#);exit(0);
             },
+            "artist" => {
+                println!(r#"SCDownload - Made by Zeunig
+
+Invalid usage, expected artist' username:
+example: zeunig"#);exit(0);
+            }
+
             _ => {
                 println!(r#"SCDownload - Made by Zeunig
 
@@ -69,10 +76,10 @@ scdownload.exe <track/album/playlist> <id of the track/album/playlist>"#);exit(0
         }
     }
     let first = args.get(1).unwrap();
-    if !(first.contains("track")) && !(first.contains("album")) && !(first.contains("playlist")) {
+    if !(first.contains("track")) && !(first.contains("album")) && !(first.contains("playlist")) && !(first.contains("artist")) {
         println!(r#"SCDownload - Made by Zeunig
 
-Invalid usage, expected either album/playlist/track as first argument"#);exit(0);
+Invalid usage, expected either album/playlist/track/artist as first argument"#);exit(0);
     }
 }
 
@@ -191,7 +198,41 @@ fn main() {
             let mut songs: Vec<String> = Vec::new();
             playlist_to_vec(req, &mut songs, list);
             prepare_download(songs, &mut paths.0, &mut paths.1, 3, false);
-        }
+        },
+        "artist" => {
+            use regex::Regex;
+            {
+                println!("Disclaimer, this feature is made for artists to back up their songs in case they lost them, if you're trying to download another artist's song, please ask for their permission\nPress ENTER to proceed");
+                let mut input_text = String::new();
+                std::io::stdin()
+                .read_line(&mut input_text)
+                .expect("failed to read from stdin");
+            }
+            logging(logging::Severities::INFO, "Fetching songs");
+            let mut arg2 = args.get(2).unwrap().to_owned();
+            if arg2.contains("soundcloud.com/") {
+                let n: Vec<&str> = arg2.split("soundcloud.com/").collect();
+                arg2 = n[1].to_owned();
+            }
+            paths.1.push(format!("artist/{}",arg2));
+            let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
+            let r = req.get(format!("https://soundcloud.com/{}",arg2)).send().unwrap().text().unwrap();
+            let reg = Regex::new(r#"content="soundcloud://users:([0-9]*?)""#).unwrap();
+            let uid = reg.captures(&r).unwrap().get(1).unwrap().as_str().to_owned();
+            let r = req.get(format!("https://api-v2.soundcloud.com/users/{}/tracks?offset=0&limit=79999&representation=&client_id=TtbhBUaHqao06g1mUwVTxbjj8TSUkiCl&app_version=1694761046&app_locale=en",uid)).send().unwrap().text().unwrap();
+            let reg = Regex::new(r#""permalink_url":"https://soundcloud\.com/((?:[a-zA-Z0-9-_]*?)/(?:[a-zA-Z0-9-_]*?))""#).unwrap();
+            let mut list: Vec<String> = Vec::new();
+            for a in reg.captures_iter(&r).map(|c| c.get(1)) {
+                match a {
+                    Some(e) => {
+                        list.push(e.as_str().to_string());
+                    },
+                    None => {}
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            prepare_download(list, &mut paths.0, &mut paths.1, 3, false);
+        },
         _ => {
             exit(0);
         }

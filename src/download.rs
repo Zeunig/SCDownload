@@ -9,13 +9,14 @@ use crate::logging::{logging, Severities};
 
 // While creating files, certain characters are not allowed to be in the name, so we use this to delete them
 fn sanitize_song_name(input: &str) -> String {
+    let mut result = input
+    .replace("\\u0026", "and"); // & -> and
+    result = result.replace("\\u003c3", "ily"); // <3 -> ily
     // idk if this part of necessary or not because all of my files are saved like this : \u0026, but better be save
     let p = Regex::new(r#"(<|>|:|"|/|\\|\||\?|\*)"#).unwrap();
-    let result = p.replace_all(input, "").to_string();
+    let result = p.replace_all(&result, "").to_string();
     // workaround for the filename limitations like a silly specimen :P
-    let result = result
-    .replace("\u{0026}", "and") // & -> and
-    .replace("\u{003c}3", "ily"); // <3 -> ily
+    
     result
 } 
 
