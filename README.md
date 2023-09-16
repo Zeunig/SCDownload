@@ -18,6 +18,7 @@ scdownload track zeunig/garou-hardstyle
 - Track/album/playlist support
 - Easy to use
 - 4 dependencies only
+- Multithreading
 - Made in Rust
 
 ## Contact
