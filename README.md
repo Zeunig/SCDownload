@@ -21,3 +21,6 @@ scdownload playlist zeunig/sets/hardstyle
 ## Contact
 [Discord server](https://discord.gg/pJVxS6uRTK)<br />
 [Website](https://zeunig.hu)
+
+# Views
+<a href="https://hits.sh/github.com/silentsoft/hits/"><img alt="Hits" src="https://hits.sh/github.com/silentsoft/hits.svg"/></a>
