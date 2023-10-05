@@ -3,9 +3,11 @@
 A simple-to-use command line tool for mass downloading tracks, playlists and albums, made with only 4 dependencies (id3,mp3cat,regex,reqwest)
 
 ## Usage
-scdownload <track/album/playlist> <id> 
+scdownload <track/album/playlist/artist> <id> 
 ### Example
 scdownload playlist zeunig/sets/hardstyle
+scdownload artist zeunig
+scdownload track zeunig/garou-hardstyle
 ### Additional arguments
 --temp-dir="path" : Changes the cache dir<br />
 --download-dir="path" : Changes the download dir
@@ -16,6 +18,7 @@ scdownload playlist zeunig/sets/hardstyle
 - Track/album/playlist support
 - Easy to use
 - 4 dependencies only
+- Multithreading
 - Made in Rust
 
 ## Contact
