@@ -4,7 +4,7 @@ use reqwest::blocking::Client;
 use std::process::Command;
 use id3::{Tag, TagLike, Version};
 use crate::logging::{logging, Severities};
-
+use reqwest::header::HeaderMap;
 
 
 // While creating files, certain characters are not allowed to be in the name, so we use this to delete them
@@ -149,8 +149,24 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
             },
             Err(_) => {
                 logging(Severities::INFO,"Found song in cache, but not metadata");
+                let mut headers = HeaderMap::new();
+                headers.insert("Accept", "application/json, text/javascript, */*; q=0.1".parse().unwrap());
+                headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
+                headers.insert("Cache-Control", "no-cache".parse().unwrap());
+                headers.insert("Connection", "keep-alive".parse().unwrap());
+                headers.insert("Content-Type", "application/json".parse().unwrap());
+                headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
+                headers.insert("Pragma", "no-cache".parse().unwrap());
+                headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
+                headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
+                headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
+                headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
+                headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
+                headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
+                headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
+                headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
                 let r = req.get(format!("https://soundcloud.com/{song}"))
-                .send().unwrap().text().unwrap();
+                .headers(headers).send().unwrap().text().unwrap();
                 // ADDITIONAL INFORMATION PARSING BEGIN
                 artist = regex_get_first(Regex::new(r#""username":"(.*?)""#).unwrap(), &r).unwrap();
                 song_name = regex_get_first(Regex::new(r#""title":"(.*?)""#).unwrap(), &r).unwrap();
@@ -188,8 +204,24 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
         }
     }else {
         drop(temp);
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "application/json, text/javascript, */*; q=0.1".parse().unwrap());
+        headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
+        headers.insert("Cache-Control", "no-cache".parse().unwrap());
+        headers.insert("Connection", "keep-alive".parse().unwrap());
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
+        headers.insert("Pragma", "no-cache".parse().unwrap());
+        headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
+        headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
+        headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
+        headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
+        headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
+        headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
+        headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
+        headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
         let r = req.get(format!("https://soundcloud.com/{song}"))
-        .send().unwrap().text().unwrap();
+        .headers(headers).send().unwrap().text().unwrap();
         // ADDITIONAL INFORMATION PARSING BEGIN
         artist = regex_get_first(Regex::new(r#""username":"(.*?)""#).unwrap(), &r).unwrap();
         song_name = regex_get_first(Regex::new(r#""title":"(.*?)""#).unwrap(), &r).unwrap();

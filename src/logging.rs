@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::{time::SystemTime, fs::OpenOptions, io::Write};
 
 // Simple logging made by Zeunig
 
@@ -26,5 +26,9 @@ pub fn logging<T: ToString>(severity: Severities, text: T) {
         trace,
         text.to_string()
     );
+    if severity == Severities::ERROR || severity == Severities::CRITICAL {
+        let mut p = OpenOptions::new().write(true).create(true).open("errors.log").unwrap();
+        let _ = p.write_all(msg.as_bytes());
+    }
     println!("{}", msg);
 }

@@ -185,7 +185,8 @@ fn main() {
             headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
             headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
             let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
-            let r = req.get(format!("https://soundcloud.com/{}", arg2)).send().unwrap().text().unwrap();
+            let r = req.get(format!("https://soundcloud.com/{}", arg2)).headers(headers).send().unwrap().text().unwrap();
+            println!("{}",req.get("https://api.ipify.org/").send().unwrap().text().unwrap());
             let reg = Regex::new(r#""id":([0-9]*?),"kind":"track","#).unwrap();
             for a in reg.captures_iter(&r).map(|c| c.get(1)) {
                 match a {
@@ -216,7 +217,20 @@ fn main() {
             }
             paths.1.push(format!("artist/{}",arg2));
             let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
-            let r = req.get(format!("https://soundcloud.com/{}",arg2)).send().unwrap().text().unwrap();
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/117.0".parse().unwrap());
+            headers.insert("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8".parse().unwrap());
+            headers.insert("Accept-Language", "en-US,en;q=0.5".parse().unwrap());
+            headers.insert("Accept-Encoding", "gzip, deflate, br".parse().unwrap());
+            headers.insert("DNT", "1".parse().unwrap());
+            headers.insert("Upgrade-Insecure-Requests", "1".parse().unwrap());
+            headers.insert("Sec-Fetch-Dest", "document".parse().unwrap());
+            headers.insert("Sec-Fetch-Mode", "navigate".parse().unwrap());
+            headers.insert("Sec-Fetch-Site", "none".parse().unwrap());
+            headers.insert("Sec-Fetch-User", "?1".parse().unwrap());
+            headers.insert("Sec-GPC", "1".parse().unwrap());
+            headers.insert("Connection", "keep-alive".parse().unwrap());
+            let r = req.get(format!("https://soundcloud.com/{}",arg2)).headers(headers).send().unwrap().text().unwrap();
             let reg = Regex::new(r#"content="soundcloud://users:([0-9]*?)""#).unwrap();
             let uid = reg.captures(&r).unwrap().get(1).unwrap().as_str().to_owned();
             let r = req.get(format!("https://api-v2.soundcloud.com/users/{}/tracks?offset=0&limit=79999&representation=&client_id=TtbhBUaHqao06g1mUwVTxbjj8TSUkiCl&app_version=1694761046&app_locale=en",uid)).send().unwrap().text().unwrap();
