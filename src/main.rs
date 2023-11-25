@@ -6,6 +6,13 @@ use crate::logging::logging;
 mod download;
 mod logging;
 
+fn get_client_id() -> String {
+    let req = reqwest::blocking::get("https://a-v2.sndcdn.com/assets/0-79b49120.js").unwrap().text().unwrap();
+    let re = regex::Regex::new(r#"client_id:"(.*?)""#).unwrap();
+    let r = re.captures(&req).unwrap().get(0).unwrap().as_str();
+    r[11..r.len()-1].to_owned()
+}
+
 fn additional_argument_helper(args: &Vec<String>) -> (PathBuf,PathBuf) {
     let mut temp_dir: PathBuf = env::temp_dir();
     let mut download_dir: PathBuf = Path::new("./").to_path_buf();
@@ -90,7 +97,7 @@ fn trimming(track: String) -> String {
     splitted.get(0).unwrap().to_string()
 }
 
-fn playlist_to_vec(req: reqwest::blocking::Client, dest: &mut Vec<String>, orig: Vec<String>) {
+fn playlist_to_vec(req: reqwest::blocking::Client, dest: &mut Vec<String>, orig: Vec<String>, client_id: &str) {
     // orig -> track ids
     use reqwest::header::HeaderMap;
     use regex::Regex;
@@ -119,7 +126,7 @@ fn playlist_to_vec(req: reqwest::blocking::Client, dest: &mut Vec<String>, orig:
         original.remove(0);
         temp = temp + 1;
         if temp == 10 {
-            url.push_str("&client_id=0nr4Ys43jAqfn0VkGXfxTWh9d4NB0o54&[object Object]=&app_version=1694501791&app_locale=en");
+            url.push_str(&format!("&client_id={client_id}&[object Object]=&app_version=1694501791&app_locale=en"));
             let r = req.get(url).headers(headers.clone()).send().unwrap().text().unwrap();
             for capture in reg.captures_iter(&r).map(|c| c.get(1)) {
                 dest.push(capture.unwrap().as_str().to_string());
@@ -128,7 +135,7 @@ fn playlist_to_vec(req: reqwest::blocking::Client, dest: &mut Vec<String>, orig:
             temp = 0;
         }
     }
-    url.push_str("&client_id=0nr4Ys43jAqfn0VkGXfxTWh9d4NB0o54&[object Object]=&app_version=1694501791&app_locale=en");
+    url.push_str(&format!("&client_id={client_id}&[object Object]=&app_version=1694501791&app_locale=en"));
     let r = req.get(url).headers(headers.clone()).send().unwrap().text().unwrap();
     for capture in reg.captures_iter(&r).map(|c| c.get(1)) {
         dest.push(capture.unwrap().as_str().to_string());
@@ -141,6 +148,7 @@ fn main() {
     check_for_invalid_arguments(&args);
     let mut paths = additional_argument_helper(&args);
     paths.0.push("SCDownloader");
+    let client_id: String = get_client_id();
     // We're safe the unwrap the args because we checked if the argument list of valid
     match args.get(1).unwrap().as_str() {
         "track" => {
@@ -155,7 +163,7 @@ fn main() {
             }
             let mut list: Vec<String> = Vec::new();
             list.push(trimming(arg2));
-            prepare_download(list, &mut paths.0, &mut paths.1, 1, true);
+            prepare_download(list, &mut paths.0, &mut paths.1, 1, true, client_id);
         },
         "playlist" | "album" => {
             let mut arg2 = args.get(2).unwrap().to_owned();
@@ -197,8 +205,8 @@ fn main() {
                 }
             }
             let mut songs: Vec<String> = Vec::new();
-            playlist_to_vec(req, &mut songs, list);
-            prepare_download(songs, &mut paths.0, &mut paths.1, 3, false);
+            playlist_to_vec(req, &mut songs, list, &client_id);
+            prepare_download(songs, &mut paths.0, &mut paths.1, 3, false, client_id);
         },
         "artist" => {
             use regex::Regex;
@@ -230,10 +238,10 @@ fn main() {
             headers.insert("Sec-Fetch-User", "?1".parse().unwrap());
             headers.insert("Sec-GPC", "1".parse().unwrap());
             headers.insert("Connection", "keep-alive".parse().unwrap());
-            let r = req.get(format!("https://soundcloud.com/{}",arg2)).headers(headers).send().unwrap().text().unwrap();
+            let r = req.get(format!("https://soundcloud.com/{}",arg2)).headers(headers.clone()).send().unwrap().text().unwrap();
             let reg = Regex::new(r#"content="soundcloud://users:([0-9]*?)""#).unwrap();
             let uid = reg.captures(&r).unwrap().get(1).unwrap().as_str().to_owned();
-            let r = req.get(format!("https://api-v2.soundcloud.com/users/{}/tracks?offset=0&limit=79999&representation=&client_id=TtbhBUaHqao06g1mUwVTxbjj8TSUkiCl&app_version=1694761046&app_locale=en",uid)).send().unwrap().text().unwrap();
+            let r = req.get(format!("https://api-v2.soundcloud.com/users/{}/tracks?offset=0&limit=79999&representation=&client_id={client_id}&app_version=1694761046&app_locale=en",uid)).headers(headers).send().unwrap().text().unwrap();
             let reg = Regex::new(r#""permalink_url":"https://soundcloud\.com/((?:[a-zA-Z0-9-_]*?)/(?:[a-zA-Z0-9-_]*?))""#).unwrap();
             let mut list: Vec<String> = Vec::new();
             for a in reg.captures_iter(&r).map(|c| c.get(1)) {
@@ -245,7 +253,7 @@ fn main() {
                 }
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
-            prepare_download(list, &mut paths.0, &mut paths.1, 3, false);
+            prepare_download(list, &mut paths.0, &mut paths.1, 3, false, client_id);
         },
         _ => {
             exit(0);

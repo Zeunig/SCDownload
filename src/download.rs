@@ -8,7 +8,7 @@ use reqwest::header::HeaderMap;
 
 
 // While creating files, certain characters are not allowed to be in the name, so we use this to delete them
-fn sanitize_song_name(input: &str) -> String {
+fn sanitize_song_name(input: &str, path: &PathBuf) -> String {
     let mut result = input
     .replace("\\u0026", "and"); // & -> and
     result = result.replace("\\u003c3", "ily"); // <3 -> ily
@@ -36,7 +36,7 @@ fn regex_get_first(regex: Regex, text: &str) -> Option<String> {
 
 struct ThreadWatcher;
 
-// If the function panics, remove one count from tthe thread count since the thread obviously isn't running
+// If the function panics, remove one count from the thread count since the thread obviously isn't running
 impl Drop for ThreadWatcher {
     fn drop(&mut self) {
         if thread::panicking() {
@@ -50,7 +50,7 @@ use std::thread;
 static GLOBAL_THREAD_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 
-pub fn prepare_download(songs: Vec<String>, temp_dir: &mut PathBuf, download_dir: &mut PathBuf, threads: usize, is_track: bool) {
+pub fn prepare_download(songs: Vec<String>, temp_dir: &mut PathBuf, download_dir: &mut PathBuf, threads: usize, is_track: bool, client_id: String) {
     let max_threads = std::sync::atomic::AtomicUsize::new(0);
     max_threads.fetch_add(threads, Ordering::SeqCst);
     let req: Client = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
@@ -64,6 +64,7 @@ pub fn prepare_download(songs: Vec<String>, temp_dir: &mut PathBuf, download_dir
                 let song_wrapped = Arc::new(Mutex::new(song.clone()));
                 let temp_dir_wrapped = Arc::new(Mutex::new(temp_dir.clone()));
                 let download_dir_wrapped = Arc::new(Mutex::new(download_dir.clone()));
+                let client_id_wrapped = Arc::new(Mutex::new(client_id.clone()));
                 GLOBAL_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
                 logging(Severities::INFO,format!("Downloading {}",&song));
                 thread::spawn(move || {
@@ -73,8 +74,9 @@ pub fn prepare_download(songs: Vec<String>, temp_dir: &mut PathBuf, download_dir
                     let song_locked = song_wrapped.lock().unwrap();
                     let mut temp_dir_locked = temp_dir_wrapped.lock().unwrap();
                     let mut download_dir_locked = download_dir_wrapped.lock().unwrap();
+                    let client_id_locked = client_id_wrapped.lock().unwrap();
                     
-                    download(req_locked.clone(), song_locked.to_string(), &mut temp_dir_locked, &mut download_dir_locked, is_track);
+                    download(req_locked.clone(), song_locked.to_string(), &mut temp_dir_locked, &mut download_dir_locked, is_track, &client_id_locked);
                     GLOBAL_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
                 });
                 run = false;
@@ -102,7 +104,7 @@ fn count_mp3(root: PathBuf) -> u32 {
 }
 
 
-fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mut PathBuf, is_track: bool) {
+fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mut PathBuf, is_track: bool, client_id: &str) {
     let mut temp_dir = temp_dir.clone().to_owned();
     let mut download_dir = download_dir.clone().to_owned();
     let mut audio_file_nmbr_count: u32 = 0;
@@ -265,7 +267,24 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
             if let Some(hls) = capture.get(1) {
                 let track_auth = track_auth.as_str();
                 let hls = hls.as_str();
-                let r = req.get(format!("{hls}?client_id=baLbCx2miy7TG4nunX9yTWklG3ecgeE9&track_authorization={track_auth}"))
+                let mut headers = HeaderMap::new();
+        headers.insert("Accept", "*/*".parse().unwrap());
+        headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
+        headers.insert("Cache-Control", "no-cache".parse().unwrap());
+        headers.insert("Connection", "keep-alive".parse().unwrap());
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
+        headers.insert("Pragma", "no-cache".parse().unwrap());
+        headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
+        headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
+        headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
+        headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
+        headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
+        headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
+        headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
+        headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
+                let r = req.get(format!("{hls}?client_id={client_id}&track_authorization={track_auth}"))
+                .headers(headers.clone())
                 .send().unwrap();
                 if !r.status().is_success() {
                     logging(Severities::ERROR, format!("Expected status code 200, got status code {} on song : {}",r.status(),&song));
@@ -276,7 +295,7 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
                     logging(Severities::ERROR, format!("No download link found on song : {} | If this issue persists, please contact the developer",&song));
                     return;
                 }
-                let r = req.get(&r[8..r.len()-2]).send().unwrap().text().unwrap();
+                let r = req.get(&r[8..r.len()-2]).headers(headers).send().unwrap().text().unwrap();
                 let re = Regex::new(r#"(https://cf-hls-media.sndcdn.com/media/.*?)\n"#).unwrap();
                 let links = re.captures_iter(&r);
                 
@@ -301,7 +320,7 @@ fn download(req: Client, song: String, temp_dir: &mut PathBuf, download_dir: &mu
     }
     // mp3cat magic
     let mut arguments: Vec<String> = Vec::new();
-    download_dir.push(format!("{}.mp3",sanitize_song_name(&song_name)));
+    download_dir.push(format!("{}.mp3",sanitize_song_name(&song_name, &download_dir)));
     
     let mut audio = 0;
     while audio < audio_file_nmbr_count {
