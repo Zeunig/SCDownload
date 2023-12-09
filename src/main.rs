@@ -6,6 +6,26 @@ use crate::logging::logging;
 mod download;
 mod logging;
 
+#[derive(Debug, Clone)]
+pub struct Arguments {
+    temp_dir: PathBuf, // formerly arguments.temp_dir
+    download_dir: PathBuf, // formerly arguments.download_dir
+    original_cover_image: bool,
+    disable_cache: bool,
+    thread_count: usize
+}
+impl Default for Arguments {
+    fn default() -> Self {
+        Self {
+            temp_dir: env::temp_dir(),
+            download_dir: Path::new("./").to_path_buf(),
+            original_cover_image: false,
+            disable_cache: false,
+            thread_count: 3
+        }
+    }
+}
+
 fn get_client_id() -> String {
     let req = reqwest::blocking::get("https://a-v2.sndcdn.com/assets/0-79b49120.js").unwrap().text().unwrap();
     let re = regex::Regex::new(r#"client_id:"(.*?)""#).unwrap();
@@ -13,7 +33,8 @@ fn get_client_id() -> String {
     r[11..r.len()-1].to_owned()
 }
 
-fn additional_argument_helper(args: &Vec<String>) -> (PathBuf,PathBuf) {
+fn additional_argument_helper(args: &Vec<String>) -> Arguments {
+    let mut argument = Arguments::default();
     let mut temp_dir: PathBuf = env::temp_dir();
     let mut download_dir: PathBuf = Path::new("./").to_path_buf();
     if let Some(tempdir_argument) = args.iter().find(|&x| x.contains("--temp-dir")) {
@@ -32,7 +53,23 @@ fn additional_argument_helper(args: &Vec<String>) -> (PathBuf,PathBuf) {
             }
         }
     }
-    (temp_dir,download_dir)
+    if let Some(_) = args.iter().find(|&x| x.contains("--original-cover-size")) {
+        argument.original_cover_image = true;
+    }
+    if let Some(_) = args.iter().find(|&x| x.contains("--disable-cache")) {
+        argument.disable_cache = true;
+    }
+    if let Some(thread_count) = args.iter().find(|&x| x.contains("--thread-count")) {
+        if let Some(equal) = thread_count.find("=") {
+            if let Ok(threads) = thread_count[equal+1..].parse::<usize>() {
+                argument.thread_count = threads;
+            }
+        }
+    }
+
+    argument.temp_dir = temp_dir;
+    argument.download_dir = download_dir;
+    argument
 }
 
 fn check_for_invalid_arguments(args: &Vec<String>) {
@@ -44,7 +81,9 @@ Usage:
 scdownload.exe <track/album/playlist> <id of the track/album/playlist>
 Additional arguments:
 --temp-dir="path" - Sets the temporary folder location
---download-dir="path" - Sets the download folder location"#);
+--download-dir="path" - Sets the download folder location
+--thread-count=10 - Sets the amount of threads (only valid for downloading playlist)
+--original-cover-size - Downloads the song cover in it's original size"#);
         exit(0);
     }
     if args.len() == 2 {
@@ -146,8 +185,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     
     check_for_invalid_arguments(&args);
-    let mut paths = additional_argument_helper(&args);
-    paths.0.push("SCDownloader");
+    let mut arguments = additional_argument_helper(&args);
+    arguments.temp_dir.push("SCDownloader");
     let client_id: String = get_client_id();
     // We're safe the unwrap the args because we checked if the argument list of valid
     match args.get(1).unwrap().as_str() {
@@ -163,7 +202,7 @@ fn main() {
             }
             let mut list: Vec<String> = Vec::new();
             list.push(trimming(arg2));
-            prepare_download(list, &mut paths.0, &mut paths.1, 1, true, client_id);
+            prepare_download(list, arguments, true, client_id);
         },
         "playlist" | "album" => {
             let mut arg2 = args.get(2).unwrap().to_owned();
@@ -172,7 +211,7 @@ fn main() {
                 arg2 = p[1].to_string();
             }
             logging(logging::Severities::INFO, "Fetching playlist");
-            paths.1.push(format!("{}",arg2));
+            arguments.download_dir.push(format!("{}",arg2));
             use reqwest::header::HeaderMap;
             use regex::Regex;
             let mut list: Vec<String> = Vec::new();
@@ -206,7 +245,7 @@ fn main() {
             }
             let mut songs: Vec<String> = Vec::new();
             playlist_to_vec(req, &mut songs, list, &client_id);
-            prepare_download(songs, &mut paths.0, &mut paths.1, 3, false, client_id);
+            prepare_download(songs, arguments, false, client_id);
         },
         "artist" => {
             use regex::Regex;
@@ -223,7 +262,7 @@ fn main() {
                 let n: Vec<&str> = arg2.split("soundcloud.com/").collect();
                 arg2 = n[1].to_owned();
             }
-            paths.1.push(format!("artist/{}",arg2));
+            arguments.download_dir.push(format!("artist/{}",arg2));
             let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/117.0".parse().unwrap());
@@ -253,7 +292,7 @@ fn main() {
                 }
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
-            prepare_download(list, &mut paths.0, &mut paths.1, 3, false, client_id);
+            prepare_download(list, arguments, false, client_id);
         },
         _ => {
             exit(0);
