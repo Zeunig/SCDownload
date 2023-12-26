@@ -27,10 +27,21 @@ impl Default for Arguments {
 }
 
 fn get_client_id() -> String {
-    let req = reqwest::blocking::get("https://a-v2.sndcdn.com/assets/0-79b49120.js").unwrap().text().unwrap();
-    let re = regex::Regex::new(r#"client_id:"(.*?)""#).unwrap();
-    let r = re.captures(&req).unwrap().get(0).unwrap().as_str();
-    r[11..r.len()-1].to_owned()
+    let req = reqwest::blocking::get("https://soundcloud.com/zeunig/test").unwrap().text().unwrap();
+    let re = regex::Regex::new(r#"https://a-v2.sndcdn.com/assets/([0-9]{1,3}-[a-zA-Z0-9*?]{8})\.js"#).unwrap();
+    let capturing: Vec<&str> = re.find_iter(&req).map(|m| m.as_str()).collect();
+    for capture in capturing {
+        let capture_request = reqwest::blocking::get(capture).unwrap().text().unwrap();
+        let re = regex::Regex::new(r#"client_id:"(.*?)""#).unwrap();
+        let r = re.find(&capture_request);
+        match r {
+            Some(client_id) => {
+                return client_id.as_str()[11..client_id.len()-1].to_string();
+            },
+            None => {}
+        }
+    }
+    panic!("no client id found");
 }
 
 fn additional_argument_helper(args: &Vec<String>) -> Arguments {
@@ -233,7 +244,6 @@ fn main() {
             headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
             let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
             let r = req.get(format!("https://soundcloud.com/{}", arg2)).headers(headers).send().unwrap().text().unwrap();
-            println!("{}",req.get("https://api.ipify.org/").send().unwrap().text().unwrap());
             let reg = Regex::new(r#""id":([0-9]*?),"kind":"track","#).unwrap();
             for a in reg.captures_iter(&r).map(|c| c.get(1)) {
                 match a {
