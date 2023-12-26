@@ -11,6 +11,8 @@ scdownload track zeunig/garou-hardstyle
 ### Additional arguments
 --temp-dir="path" : Changes the cache dir<br />
 --download-dir="path" : Changes the download dir
+--thread-count=number : Changes the amount of threads (only valid while downloading playlists)
+--original-cover-size : Downloads the song's cover image in it's original size
 ## Features
 - Caching
 - ID3
