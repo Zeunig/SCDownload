@@ -213,47 +213,7 @@ fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool
                     .unwrap();
             logging(Severities::DEBUG, format!("{:?}",command));
             add_metadata(song, &mut temp_dir, &download_dir);
-                        // mp3cat magic
-                        /*let mut arguments: Vec<String> = Vec::new();
-                    download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
-                    
-                    let mut audio = 0;
-                    while audio < song.audio_file_count {
-                        let mut a = temp_dir.clone();
-                        a.push(format!("{}.mp3", audio));
-                        arguments.push(a.to_str().unwrap().to_string());
-                        audio = audio + 1;
-                    }
-                    let command = Command::new("mp3cat")
-                    //.arg(download_dir.to_str().unwrap())
-                    .args(&arguments)
-                    .arg("-o")
-                    .arg(download_dir.to_str().unwrap())
-                    .arg("-q")
-                    .arg("-f")
-                    .spawn();//.expect("Failed to execute cmd message");
-                    match command {
-                        Ok(mut child) => {
-                            match child.wait() {
-                                Ok(_) => {
-                                    add_metadata(song, &mut temp_dir, &download_dir);
-                                },
-                                Err(_) => {
-                                    logging(Severities::WARNING, "Error occured while running command, skipping ID3 tags");
-                                }
-                            } 
-                        },
-                        Err(err) => {
-                            println!("{}",err.to_string());
-                            if err.to_string().contains("The filename or extension is too long") {
-                                logging(Severities::CRITICAL, "Song too long");
-                            } else {
-                                logging(Severities::CRITICAL, format!("Failed to execute cmd command, make sure the mp3cat file is in the same folder as the scdownload.exe, if that doesn't work, please contact the developer with this message : {:?}",err));
-                                return;
-                            }
-                        }
-                    }*/
-            }
+        }
         FileType::M4S => {
                 let mut buffer = Vec::new();
                 let mut path = temp_dir.clone();
