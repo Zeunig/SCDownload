@@ -5,9 +5,9 @@ A simple-to-use command line tool for mass downloading tracks, playlists and alb
 ## Usage
 scdownload <track/album/playlist/artist> <url> 
 ### Example
-scdownload playlist zeunig/sets/hardstyle
-scdownload artist zeunig
-scdownload track zeunig/garou-hardstyle
+scdownload playlist zeunig/sets/hardstyle<br />
+scdownload artist zeunig<br />
+scdownload track zeunig/garou-hardstyle<br />
 ### Additional arguments
 --temp-dir="path" : Changes the cache dir<br />
 --download-dir="path" : Changes the download dir<br />
