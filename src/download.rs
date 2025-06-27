@@ -1,11 +1,10 @@
-use std::{path::PathBuf, fs::OpenOptions, io::Write, sync::{atomic::Ordering, Mutex, Arc}, time::Duration, ffi::OsStr};
+use std::{ffi::OsStr, fs::OpenOptions, io::{Read, Write}, path::PathBuf, sync::{atomic::Ordering, Arc, Mutex}, time::Duration};
 use regex::Regex;
 use reqwest::blocking::Client;
-use std::process::Command;
 use id3::{Tag, TagLike, Version};
 use crate::{logging::{logging, Severities}, Arguments};
 use reqwest::header::HeaderMap;
-
+use ffmpeg_sidecar::command::FfmpegCommand;
 
 // While creating files, certain characters are not allowed to be in the name, so we use this to delete them
 fn sanitize_song_name(input: &str) -> String {
@@ -103,22 +102,38 @@ fn count_mp3(root: PathBuf) -> u32 {
 
     for path in std::fs::read_dir(root).unwrap() {
         let path = path.unwrap().path();
-        if let Some("mp3") = path.extension().and_then(OsStr::to_str) {
-            result.push(path.to_owned());
+        if let Some(x) = path.extension().and_then(OsStr::to_str) {
+            if x == "mp3" || x == "m4s" {
+                result.push(path.to_owned());
+            }
         }
     }
     result.len() as u32
 }
 
+enum FileType {
+    Undefined,
+    MP3,
+    M4S
+}
+#[derive(Default, Clone, Debug)]
+struct Song {
+    audio_file_count: u32,
+    uri: String,
+    cover_path: PathBuf,
+    artist: String,
+    name: String,
+    cover: String
+}
 
-fn download(req: Client, song: String, arguments: &Arguments, is_track: bool, client_id: &str) {
+fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool, client_id: &str) {
     let mut temp_dir = arguments.temp_dir.clone().to_owned();
     let mut download_dir = arguments.download_dir.clone().to_owned();
-    let mut audio_file_nmbr_count: u32 = 0;
-    temp_dir.push(song.split("/").nth(0).unwrap());
-    temp_dir.push(song.split("/").nth(1).unwrap());
+    let mut file_type: FileType = FileType::MP3;
+    temp_dir.push(song_uri.split("/").nth(0).unwrap());
+    temp_dir.push(song_uri.split("/").nth(1).unwrap());
     if is_track {
-        download_dir.push(song.split("/").nth(0).unwrap());
+        download_dir.push(song_uri.split("/").nth(0).unwrap());
     }
     
     match std::fs::create_dir_all(&temp_dir) {
@@ -135,171 +150,143 @@ fn download(req: Client, song: String, arguments: &Arguments, is_track: bool, cl
         }
     }
     let mut temp = temp_dir.clone();temp.push("0.mp3");
-    let mut cover_path = temp_dir.clone();cover_path.push("cover.jpg");
-    #[allow(unused_assignments)]
-    let mut artist: String = String::new();
-    #[allow(unused_assignments)]
-    let mut song_name: String = String::new();
-    #[allow(unused_assignments)]
-    let mut cover: String = String::new();
+    let mut song = Song::default();
+    song.cover_path = {
+        let mut patthh = temp_dir.clone();
+        patthh.push("cover.jpg");
+        patthh
+    };
+    song.uri = song_uri;
     // CACHE
     if !arguments.disable_cache {
         if temp.exists() {
-            logging(Severities::INFO, format!("Song already exists in cache : {}",song));
-            audio_file_nmbr_count = count_mp3(temp_dir.clone());
+            logging(Severities::INFO, format!("Song already exists in cache : {}",song.name));
+            song.audio_file_count = count_mp3(temp_dir.clone());
             drop(temp);
             let mut temp = temp_dir.clone();temp.push("metadata.txt");
             let metadata = std::fs::read_to_string(temp);
             match metadata {
                 Ok(metadata) => {
                     let metadata: Vec<&str> = metadata.split("|").collect();
-                    artist = metadata.get(0).unwrap().to_string();
-                    song_name = metadata.get(1).unwrap().to_string();
+                    song.artist = metadata.get(0).unwrap().to_string();
+                    song.name = metadata.get(1).unwrap().to_string();
                 },
                 Err(_) => {
-                    download_metadata(req, &song, arguments, &mut temp_dir, &mut artist, &mut song_name, &mut cover);
+                    download_metadata(req, &song.uri, arguments, &mut temp_dir, &mut song.artist, &mut song.name, &mut song.cover);
                 }
             }
         }else {
-            download_metadata(req.clone(), &song, arguments, &mut temp_dir, &mut artist, &mut song_name, &mut cover);
-            let re = Regex::new(r#"track_authorization":"(.*?)""#).unwrap();
-            let mut headers = HeaderMap::new();
-            headers.insert("Accept", "application/json, text/javascript, */*; q=0.1".parse().unwrap());
-            headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
-            headers.insert("Cache-Control", "no-cache".parse().unwrap());
-            headers.insert("Connection", "keep-alive".parse().unwrap());
-            headers.insert("Content-Type", "application/json".parse().unwrap());
-            headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
-            headers.insert("Pragma", "no-cache".parse().unwrap());
-            headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
-            headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
-            headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
-            headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
-            headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
-            headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
-            headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
-            headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
-            let r = req.get(format!("https://soundcloud.com/{song}"))
-            .headers(headers).send().unwrap().text().unwrap();
-            let capture = re.captures(&r).unwrap();
-            if let Some(track_auth) = capture.get(1) {
-                let capture = Regex::new(r#"\{"url":"(.*?)""#).unwrap().captures(&r).unwrap();
-                if let Some(hls) = capture.get(1) {
-                    let track_auth = track_auth.as_str();
-                    let hls = hls.as_str();
-                    let mut headers = HeaderMap::new();
-            headers.insert("Accept", "*/*".parse().unwrap());
-            headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
-            headers.insert("Cache-Control", "no-cache".parse().unwrap());
-            headers.insert("Connection", "keep-alive".parse().unwrap());
-            headers.insert("Content-Type", "application/json".parse().unwrap());
-            headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
-            headers.insert("Pragma", "no-cache".parse().unwrap());
-            headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
-            headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
-            headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
-            headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
-            headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
-            headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
-            headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
-            headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
-                    let r = req.get(format!("{hls}?client_id={client_id}&track_authorization={track_auth}"))
-                    .headers(headers.clone())
-                    .send().unwrap();
-                    if !r.status().is_success() {
-                        logging(Severities::ERROR, format!("Expected status code 200, got status code {} on song : {}",r.status(),&song));
-                        return;
-                    }
-                    let r = r.text().unwrap();
-                    if r.contains(r#""url":null"#) {
-                        logging(Severities::ERROR, format!("No download link found on song : {} | If this issue persists, please contact the developer",&song));
-                        return;
-                    }
-                    let r = req.get(&r[8..r.len()-2]).headers(headers).send().unwrap().text().unwrap();
-                    let re = Regex::new(r#"(https://cf-hls-media.sndcdn.com/media/.*?)\n"#).unwrap();
-                    let links = re.captures_iter(&r);
+            download_audio(&mut song, arguments, &req, &mut temp_dir, client_id);
+        }
+    }else {
+        download_audio(&mut song, arguments, &req, &mut temp_dir, client_id);
+    }
+    // check if we have legacy or non-legacy streaming downloaded
+    let mut check = download_dir.clone();
+    check.push("1.m4s");
+    if check.exists() {
+        file_type = FileType::M4S;
+    }
+
+    match file_type {
+        FileType::MP3 => {
+            download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
+            let mut input_string = "concat:".to_string();
+            for i in 0..song.audio_file_count {
+                if i > 0 {
+                    input_string += "|";
+                }
+                //input_string += &format!("/{}.mp3",i);
+                let mut a = temp_dir.clone();
+                a.push(format!("{}.mp3", i));
+                input_string += a.to_str().unwrap();
+            }
+            logging(Severities::DEBUG, format!("Input string : {}",input_string));
+            let mut command = FfmpegCommand::new();
+            command.input(input_string);
+            command.codec_audio("copy");
+            command.output(download_dir.to_str().unwrap());
+            logging(Severities::DEBUG, format!("{:?}",command));
+            let mut command = command.spawn()
+                    .unwrap();
+            let command = command.wait()
+                    .unwrap();
+            logging(Severities::DEBUG, format!("{:?}",command));
+            add_metadata(song, &mut temp_dir, &download_dir);
+                        // mp3cat magic
+                        /*let mut arguments: Vec<String> = Vec::new();
+                    download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
                     
-                    
-                    for link in links {
-                        let link = &link[0];
-                        let r = req.get(link).send().unwrap().bytes().unwrap();
+                    let mut audio = 0;
+                    while audio < song.audio_file_count {
                         let mut a = temp_dir.clone();
-                        a.push(format!("{}.mp3",audio_file_nmbr_count));
-                        let mut file = OpenOptions::new().write(true).create(true).open(a).unwrap();
-                        let a = file.write_all(&r);
-                        match a {
-                            Ok(_) => {},
-                            Err(err) => {
-                                println!("Failed to write to file, additional information : {}",err);
+                        a.push(format!("{}.mp3", audio));
+                        arguments.push(a.to_str().unwrap().to_string());
+                        audio = audio + 1;
+                    }
+                    let command = Command::new("mp3cat")
+                    //.arg(download_dir.to_str().unwrap())
+                    .args(&arguments)
+                    .arg("-o")
+                    .arg(download_dir.to_str().unwrap())
+                    .arg("-q")
+                    .arg("-f")
+                    .spawn();//.expect("Failed to execute cmd message");
+                    match command {
+                        Ok(mut child) => {
+                            match child.wait() {
+                                Ok(_) => {
+                                    add_metadata(song, &mut temp_dir, &download_dir);
+                                },
+                                Err(_) => {
+                                    logging(Severities::WARNING, "Error occured while running command, skipping ID3 tags");
+                                }
+                            } 
+                        },
+                        Err(err) => {
+                            println!("{}",err.to_string());
+                            if err.to_string().contains("The filename or extension is too long") {
+                                logging(Severities::CRITICAL, "Song too long");
+                            } else {
+                                logging(Severities::CRITICAL, format!("Failed to execute cmd command, make sure the mp3cat file is in the same folder as the scdownload.exe, if that doesn't work, please contact the developer with this message : {:?}",err));
+                                return;
                             }
                         }
-                        audio_file_nmbr_count += 1;
-                    }
-                }
+                    }*/
             }
-        }
-    }
-    
-    // mp3cat magic
-    let mut arguments: Vec<String> = Vec::new();
-    download_dir.push(format!("{}.mp3",sanitize_song_name(&song_name)));
-    
-    let mut audio = 0;
-    while audio < audio_file_nmbr_count {
-        let mut a = temp_dir.clone();
-        a.push(format!("{}.mp3", audio));
-        arguments.push(a.to_str().unwrap().to_string());
-        audio = audio + 1;
-    }
-    let command = Command::new("mp3cat")
-    //.arg(download_dir.to_str().unwrap())
-    .args(&arguments)
-    .arg("-o")
-    .arg(download_dir.to_str().unwrap())
-    .arg("-q")
-    .arg("-f")
-    .spawn();//.expect("Failed to execute cmd message");
-    match command {
-        Ok(mut child) => {
-            match child.wait() {
-                Ok(_) => {
-                    let mut tag: Tag = match Tag::read_from_path(download_dir.to_str().unwrap()) {
-                        Ok(tag) => tag,
-                        Err(id3::Error{kind: id3::ErrorKind::NoTag, ..}) => Tag::new(),
-                        Err(_) => return,
-                    };
-                    // add cover image, artist etc. to song
-                    tag.set_title(song_name);
-                    tag.set_album_artist(&artist);
-                    tag.set_artist(artist);
-                    // Every album must be unique, because of Spotify's weird optimization(?) of using one image for the album
-                    tag.set_album(&song);
-                    let mut cover_image = temp_dir.clone(); cover_image.push("cover.jpg");
-                    tag.add_frame(id3::frame::Picture { 
-                        mime_type: String::from("image/jpeg"), 
-                        picture_type: id3::frame::PictureType::Media,
-                        description: String::new(),
-                        data: std::fs::read(cover_image).unwrap()
-                    });
-                    let _ = tag.write_to_path(download_dir.to_str().unwrap(), Version::Id3v23);
-                },
-                Err(_) => {
-                    logging(Severities::WARNING, "Error occured while running command, skipping ID3 tags");
+        FileType::M4S => {
+                let mut buffer = Vec::new();
+                let mut path = temp_dir.clone();
+                path.push("0.mp3");
+                let mut oo = OpenOptions::new().read(true).open(path).unwrap();
+                oo.read_to_end(&mut buffer).unwrap();
+                for i in 1..song.audio_file_count {
+                    let mut path = temp_dir.clone();
+                    path.push(format!("{i}.m4s"));
+                    let mut oo = OpenOptions::new().read(true).open(path).unwrap();
+                    oo.read_to_end(&mut buffer).unwrap();
                 }
-            } 
+                download_dir.push("temp.mp4");
+                let mut oo = OpenOptions::new().write(true).create(true).truncate(true).open(&download_dir).unwrap();
+                oo.write_all(&buffer).unwrap();
+                let mut convert = FfmpegCommand::new();
+                convert.input(download_dir.to_str().unwrap());
+                download_dir.pop();
+                download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
+                convert.output(download_dir.to_str().unwrap());
+                convert.spawn().unwrap().wait().unwrap();
+                let final_dir = download_dir.clone();
+                download_dir.pop();
+                download_dir.push("temp.mp4");
+                std::fs::remove_file(download_dir).unwrap();
+                add_metadata(song, &mut temp_dir, &final_dir);
+            },
+        FileType::Undefined => {
+            logging(Severities::ERROR, format!("Something went wrong while trying to download song : {} | If this issue persists, please contact the developer", song.name));
         },
-        Err(err) => {
-            println!("{}",err.to_string());
-            if err.to_string().contains("The filename or extension is too long") {
-                logging(Severities::CRITICAL, "Song too long");
-            } else {
-                logging(Severities::CRITICAL, format!("Failed to execute cmd command, make sure the mp3cat file is in the same folder as the scdownload.exe, if that doesn't work, please contact the developer with this message : {:?}",err));
-                return;
-            }
-        }
     }
     
-    logging(Severities::INFO, format!("Finished downloading {}",song));
+    
 }
 
 fn download_metadata(req: Client, song: &str, arguments: &Arguments, temp_dir: &mut PathBuf, artist: &mut String, song_name: &mut String, cover: &mut String) {
@@ -333,8 +320,7 @@ fn download_metadata(req: Client, song: &str, arguments: &Arguments, temp_dir: &
         {
             Some(e) => {
                 if arguments.original_cover_image {
-                    let e = e.replace("t500x500", "original");
-                    e
+                    e.replace("t500x500", "original")
                 }else {
                     e
                 }
@@ -356,4 +342,113 @@ fn download_metadata(req: Client, song: &str, arguments: &Arguments, temp_dir: &
             let _ = file.write_all(&r);
         }
     }
+}
+
+fn add_metadata(song: Song, temp_dir: &mut PathBuf, download_dir: &PathBuf) {
+    let mut tag: Tag = match Tag::read_from_path(download_dir.to_str().unwrap()) {
+        Ok(tag) => tag,
+        Err(id3::Error{kind: id3::ErrorKind::NoTag, ..}) => Tag::new(),
+        Err(_) => return,
+    };
+    // add cover image, artist etc. to song
+    tag.set_title(song.name);
+    tag.set_album_artist(&song.artist);
+    tag.set_artist(song.artist);
+    // Every album must be unique, because of Spotify's weird optimization(?) of using one image for the album
+    tag.set_album(&song.uri);
+    let mut cover_image = temp_dir.clone(); cover_image.push("cover.jpg");
+    tag.add_frame(id3::frame::Picture { 
+        mime_type: String::from("image/jpeg"), 
+        picture_type: id3::frame::PictureType::Media,
+        description: String::new(),
+        data: std::fs::read(cover_image).unwrap()
+    });
+    let _ = tag.write_to_path(download_dir.to_str().unwrap(), Version::Id3v23);
+    logging(Severities::INFO, format!("Successfully downloaded {}",song.uri));
+}
+
+fn download_audio(song: &mut Song, arguments: &Arguments, req: &Client, temp_dir: &mut PathBuf, client_id: &str) -> FileType {
+    let mut file_type = FileType::Undefined;
+    download_metadata(req.clone(), &song.uri, arguments, temp_dir, &mut song.artist, &mut song.name, &mut song.cover);
+    let re = Regex::new(r#"track_authorization":"(.*?)""#).unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert("Accept", "application/json, text/javascript, */*; q=0.1".parse().unwrap());
+    headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
+    headers.insert("Cache-Control", "no-cache".parse().unwrap());
+    headers.insert("Connection", "keep-alive".parse().unwrap());
+    headers.insert("Content-Type", "application/json".parse().unwrap());
+    headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
+    headers.insert("Pragma", "no-cache".parse().unwrap());
+    headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
+    headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
+    headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
+    headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
+    headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
+    headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
+    headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
+    headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
+    let r = req.get(format!("https://soundcloud.com/{}",song.uri))
+    .headers(headers).send().unwrap().text().unwrap();
+    let capture = re.captures(&r).unwrap();
+    if let Some(track_auth) = capture.get(1) {
+        for (_, [hls]) in Regex::new(r#"\{"url":"(.*?)""#).unwrap().captures_iter(&r).map(|x| x.extract()) {
+            let track_auth = track_auth.as_str();
+            let mut headers = HeaderMap::new();
+            headers.insert("Accept", "*/*".parse().unwrap());
+            headers.insert("Accept-Language", "hu-HU,hu;q=0.9".parse().unwrap());
+            headers.insert("Cache-Control", "no-cache".parse().unwrap());
+            headers.insert("Connection", "keep-alive".parse().unwrap());
+            headers.insert("Content-Type", "application/json".parse().unwrap());
+            headers.insert("Origin", "https://soundcloud.com".parse().unwrap());
+            headers.insert("Pragma", "no-cache".parse().unwrap());
+            headers.insert("Referer", "https://soundcloud.com/".parse().unwrap());
+            headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
+            headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
+            headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
+            headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36".parse().unwrap());
+            headers.insert("sec-ch-ua", "\"Chromium\";v=\"116\", \"Not)A;Brand\";v=\"24\", \"Google Chrome\";v=\"116\"".parse().unwrap());
+            headers.insert("sec-ch-ua-mobile", "?0".parse().unwrap());
+            headers.insert("sec-ch-ua-platform", "\"Windows\"".parse().unwrap());
+            logging(Severities::DEBUG, format!("Trying HLS link : {hls}?client_id={client_id}&track_authorization={track_auth}"));
+            let r = req.get(format!("{hls}?client_id={client_id}&track_authorization={track_auth}"))
+            .headers(headers.clone())
+            .send().unwrap();
+            if !r.status().is_success() {
+                logging(Severities::WARNING, format!("Expected status code 200, got status code {} on song, trying next download method : {}",r.status(),&song.name));
+                continue;
+            }
+            let r = r.text().unwrap();
+            if r.contains(r#""url":null"#) {
+                logging(Severities::WARNING, format!("No download link found on song, trying next download method : {}",&song.name));
+                continue;
+            }
+            let r = req.get(&r[8..r.len()-2]).headers(headers.clone()).send().unwrap().text().unwrap();
+            logging(Severities::INFO, format!("Valid download URL found, downloading song {}",song.name));
+            let re = Regex::new(r#"(https://cf-hls-media.sndcdn.com/media/.*?|https://playback.media-streaming.soundcloud.cloud.*?)\n"#).unwrap();
+            let links = re.captures_iter(&r);
+            file_type = FileType::MP3;
+            for link in links {
+                let link = &link[0].replace("\"","");
+                let r = req.get(link).headers(headers.clone()).send().unwrap().bytes().unwrap();
+                let mut a = temp_dir.clone();
+                if link.contains(".m4s") {
+                    a.push(format!("{}.m4s",song.audio_file_count));
+                    file_type = FileType::M4S;
+                }else {
+                    a.push(format!("{}.mp3",song.audio_file_count));
+                }
+                let mut file = OpenOptions::new().write(true).create(true).open(a).unwrap();
+                let a = file.write_all(&r);
+                match a {
+                    Ok(_) => {},
+                    Err(err) => {
+                        println!("Failed to write to file, additional information : {}",err);
+                    }
+                }
+                song.audio_file_count += 1;
+            }
+            break;
+        }
+    }
+    file_type
 }

@@ -1,6 +1,7 @@
 use std::{env, process::exit, path::{Path, PathBuf}};
 
 use download::prepare_download;
+use ffmpeg_sidecar::{command::ffmpeg_is_installed, download::{download_ffmpeg_package, ffmpeg_download_url, unpack_ffmpeg}};
 
 use crate::logging::logging;
 mod download;
@@ -123,7 +124,12 @@ example: zeunig/sets/hardstyle"#);exit(0);
 Invalid usage, expected artist' username:
 example: zeunig"#);exit(0);
             }
+            "liked" => {
+                println!(r#"SCDownload - Made by Zeunig
 
+Invalid usage, expected username:
+example: zeunig"#);exit(0);
+            }
             _ => {
                 println!(r#"SCDownload - Made by Zeunig
 
@@ -133,7 +139,7 @@ scdownload.exe <track/album/playlist> <id of the track/album/playlist>"#);exit(0
         }
     }
     let first = args.get(1).unwrap();
-    if !(first.contains("track")) && !(first.contains("album")) && !(first.contains("playlist")) && !(first.contains("artist")) {
+    if !(first.contains("track")) && !(first.contains("album")) && !(first.contains("playlist")) && !(first.contains("artist")) && !(first.contains("liked")) {
         println!(r#"SCDownload - Made by Zeunig
 
 Invalid usage, expected either album/playlist/track/artist as first argument"#);exit(0);
@@ -193,12 +199,24 @@ fn playlist_to_vec(req: reqwest::blocking::Client, dest: &mut Vec<String>, orig:
 }
 
 fn main() {
+    if !ffmpeg_is_installed() {
+        logging(logging::Severities::WARNING, "FFmpeg is not installed, downloading. . .");
+        let archive_path = download_ffmpeg_package(ffmpeg_download_url().unwrap(), Path::new("./")).unwrap();
+        unpack_ffmpeg(&archive_path, Path::new("./")).unwrap();
+        logging(logging::Severities::OKAY, "FFmpeg installed if downloading songs doesn't work, then please restart the application");
+    }
     let args: Vec<String> = env::args().collect();
     
     check_for_invalid_arguments(&args);
     let mut arguments = additional_argument_helper(&args);
     arguments.temp_dir.push("SCDownloader");
     let client_id: String = get_client_id();
+    logging(logging::Severities::DEBUG, format!(r#"Config : 
+- Disable cache : {}
+- Temp directory : {}
+- Download directory : {}
+- Threads : {}
+- Keep original cover size : {}"#, arguments.disable_cache, arguments.temp_dir.to_str().unwrap(), arguments.download_dir.to_str().unwrap(), arguments.thread_count, arguments.original_cover_image));
     // We're safe the unwrap the args because we checked if the argument list of valid
     match args.get(1).unwrap().as_str() {
         "track" => {
@@ -260,7 +278,7 @@ fn main() {
         "artist" => {
             use regex::Regex;
             {
-                println!("Disclaimer, this feature is made for artists to back up their songs in case they lost them, if you're trying to download another artist's song, please ask for their permission\nPress ENTER to proceed");
+                println!("Disclaimer, this feature is made for artists to back up their songs in case they lost them, if you're trying to download another artist's song, please ask for their permission first\nPress ENTER to proceed");
                 let mut input_text = String::new();
                 std::io::stdin()
                 .read_line(&mut input_text)
@@ -278,7 +296,6 @@ fn main() {
             headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/117.0".parse().unwrap());
             headers.insert("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8".parse().unwrap());
             headers.insert("Accept-Language", "en-US,en;q=0.5".parse().unwrap());
-            headers.insert("Accept-Encoding", "gzip, deflate, br".parse().unwrap());
             headers.insert("DNT", "1".parse().unwrap());
             headers.insert("Upgrade-Insecure-Requests", "1".parse().unwrap());
             headers.insert("Sec-Fetch-Dest", "document".parse().unwrap());
@@ -288,8 +305,13 @@ fn main() {
             headers.insert("Sec-GPC", "1".parse().unwrap());
             headers.insert("Connection", "keep-alive".parse().unwrap());
             let r = req.get(format!("https://soundcloud.com/{}",arg2)).headers(headers.clone()).send().unwrap().text().unwrap();
+            println!("{}",r);
             let reg = Regex::new(r#"content="soundcloud://users:([0-9]*?)""#).unwrap();
-            let uid = reg.captures(&r).unwrap().get(1).unwrap().as_str().to_owned();
+            let uid = reg.find(&r).unwrap()
+            .as_str()
+            .to_owned();
+            let uid = uid.replace("content=\"soundcloud://users:", "");
+            let uid = uid.replace("\"", "");
             let r = req.get(format!("https://api-v2.soundcloud.com/users/{}/tracks?offset=0&limit=79999&representation=&client_id={client_id}&app_version=1694761046&app_locale=en",uid)).headers(headers).send().unwrap().text().unwrap();
             let reg = Regex::new(r#""permalink_url":"https://soundcloud\.com/((?:[a-zA-Z0-9-_]*?)/(?:[a-zA-Z0-9-_]*?))""#).unwrap();
             let mut list: Vec<String> = Vec::new();
@@ -302,6 +324,35 @@ fn main() {
                 }
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
+            prepare_download(list, arguments, false, client_id);
+        },
+        "liked" => {
+            use regex::Regex;
+            logging(logging::Severities::INFO, "Fetching songs");
+            let mut arg2 = args.get(2).unwrap().to_owned();
+            if arg2.contains("/likes") {
+                arg2 = arg2.split("/likes").collect::<Vec<&str>>().first().unwrap().to_string();
+            }
+            if arg2.contains("soundcloud.com/") {
+                let n: Vec<&str> = arg2.split("soundcloud.com/").collect();
+                arg2 = n[1].to_owned();
+            }
+            arguments.download_dir.push(format!("liked/{}",arg2));
+            let req = reqwest::blocking::ClientBuilder::new().use_rustls_tls().danger_accept_invalid_certs(true).build().unwrap();
+            let resp = req.get(format!("https://soundcloud.com/{}",arg2)).send().unwrap().text().unwrap();
+            let re = Regex::new(r#"soundcloud://users:([0-9]*?)""#).unwrap();
+            let uid = re.captures(&resp).unwrap().get(1).unwrap().as_str();
+            let resp = req.get(format!("https://api-v2.soundcloud.com/users/{}/likes?client_id={}&limit=999999&offset=0&linked_partitioning=1&app_version=1709298204&app_locale=en",uid, client_id)).send().unwrap().text().unwrap();
+            let reg = Regex::new(r#""permalink_url":"https://soundcloud\.com/((?:[a-zA-Z0-9-_]*?)/(?:[a-zA-Z0-9-_]*?))""#).unwrap();
+            let mut list: Vec<String> = Vec::new();
+            for a in reg.captures_iter(&resp).map(|c| c.get(1)) {
+                if let Some(e) = a {
+                    if !e.as_str().contains("/sets/") {
+                        list.push(e.as_str().to_string());
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
             prepare_download(list, arguments, false, client_id);
         },
         _ => {

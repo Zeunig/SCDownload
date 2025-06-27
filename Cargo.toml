@@ -1,12 +1,16 @@
 [package]
 name = "scdownload"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Bence <business@mail.zeunig.hu>"]
+
+[profile.release]
+strip = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ffmpeg-sidecar = "2.0.6"
 id3 = "1.7.0"
 regex = "1.9.5"
 reqwest = {version="0.11.20",features = ["rustls-tls","blocking"]}
