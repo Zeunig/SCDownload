@@ -3,11 +3,12 @@
 A simple-to-use command line tool for mass downloading tracks, playlists and albums, made with only 4 dependencies (id3,ffmpeg,regex,reqwest)
 
 ## Usage
-scdownload <track/album/playlist/artist> <url> 
+scdownload <track/album/playlist/artist/liked> <url> 
 ### Example
 scdownload playlist zeunig/sets/hardstyle<br />
 scdownload artist zeunig<br />
 scdownload track zeunig/garou-hardstyle<br />
+scdownload liked zeunig
 ### Additional arguments
 --temp-dir="path" : Changes the cache dir<br />
 --download-dir="path" : Changes the download dir<br />
