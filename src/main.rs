@@ -95,7 +95,8 @@ Additional arguments:
 --temp-dir="path" - Sets the temporary folder location
 --download-dir="path" - Sets the download folder location
 --thread-count=10 - Sets the amount of threads (only valid for downloading playlist)
---original-cover-size - Downloads the song cover in it's original size"#);
+--original-cover-size - Downloads the song cover in it's original size
+--disable-cache=true - Forces the program to redownload all the songs"#);
         exit(0);
     }
     if args.len() == 2 {

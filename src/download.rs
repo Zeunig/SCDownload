@@ -182,7 +182,7 @@ fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool
         download_audio(&mut song, arguments, &req, &mut temp_dir, client_id);
     }
     // check if we have legacy or non-legacy streaming downloaded
-    let mut check = download_dir.clone();
+    let mut check = temp_dir.clone();
     check.push("1.m4s");
     if check.exists() {
         file_type = FileType::M4S;
@@ -190,6 +190,7 @@ fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool
 
     match file_type {
         FileType::MP3 => {
+            logging(Severities::DEBUG, format!("Downloading {} with file format MP3", song.name));
             download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
             let mut input_string = "concat:".to_string();
             for i in 0..song.audio_file_count {
@@ -215,31 +216,32 @@ fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool
             add_metadata(song, &mut temp_dir, &download_dir);
         }
         FileType::M4S => {
-                let mut buffer = Vec::new();
+            logging(Severities::DEBUG, format!("Downloading {} with file format M4S", song.name));
+            let mut buffer = Vec::new();
+            let mut path = temp_dir.clone();
+            path.push("0.mp3");
+            let mut oo = OpenOptions::new().read(true).open(path).unwrap();
+            oo.read_to_end(&mut buffer).unwrap();
+            for i in 1..song.audio_file_count {
                 let mut path = temp_dir.clone();
-                path.push("0.mp3");
+                path.push(format!("{i}.m4s"));
                 let mut oo = OpenOptions::new().read(true).open(path).unwrap();
                 oo.read_to_end(&mut buffer).unwrap();
-                for i in 1..song.audio_file_count {
-                    let mut path = temp_dir.clone();
-                    path.push(format!("{i}.m4s"));
-                    let mut oo = OpenOptions::new().read(true).open(path).unwrap();
-                    oo.read_to_end(&mut buffer).unwrap();
-                }
-                download_dir.push("temp.mp4");
-                let mut oo = OpenOptions::new().write(true).create(true).truncate(true).open(&download_dir).unwrap();
-                oo.write_all(&buffer).unwrap();
-                let mut convert = FfmpegCommand::new();
-                convert.input(download_dir.to_str().unwrap());
-                download_dir.pop();
-                download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
-                convert.output(download_dir.to_str().unwrap());
-                convert.spawn().unwrap().wait().unwrap();
-                let final_dir = download_dir.clone();
-                download_dir.pop();
-                download_dir.push("temp.mp4");
-                std::fs::remove_file(download_dir).unwrap();
-                add_metadata(song, &mut temp_dir, &final_dir);
+            }
+            download_dir.push("temp.mp4");
+            let mut oo = OpenOptions::new().write(true).create(true).truncate(true).open(&download_dir).unwrap();
+            oo.write_all(&buffer).unwrap();
+            let mut convert = FfmpegCommand::new();
+            convert.input(download_dir.to_str().unwrap());
+            download_dir.pop();
+            download_dir.push(format!("{}.mp3",sanitize_song_name(&song.name)));
+            convert.output(download_dir.to_str().unwrap());
+            convert.spawn().unwrap().wait().unwrap();
+            let final_dir = download_dir.clone();
+            download_dir.pop();
+            download_dir.push("temp.mp4");
+            std::fs::remove_file(download_dir).unwrap();
+            add_metadata(song, &mut temp_dir, &final_dir);
             },
         FileType::Undefined => {
             logging(Severities::ERROR, format!("Something went wrong while trying to download song : {} | If this issue persists, please contact the developer", song.name));
@@ -382,7 +384,8 @@ fn download_audio(song: &mut Song, arguments: &Arguments, req: &Client, temp_dir
                 logging(Severities::WARNING, format!("No download link found on song, trying next download method : {}",&song.name));
                 continue;
             }
-            let r = req.get(&r[8..r.len()-2]).headers(headers.clone()).send().unwrap().text().unwrap();
+            logging(Severities::DEBUG, format!("Parsed URL : {}", &r[8..r.len()-19]));
+            let r = req.get(&r[8..r.len()-19]).headers(headers.clone()).send().unwrap().text().unwrap();
             logging(Severities::INFO, format!("Valid download URL found, downloading song {}",song.name));
             let re = Regex::new(r#"(https://cf-hls-media.sndcdn.com/media/.*?|https://playback.media-streaming.soundcloud.cloud.*?)\n"#).unwrap();
             let links = re.captures_iter(&r);
