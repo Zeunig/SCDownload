@@ -96,11 +96,24 @@ Additional arguments:
 --download-dir="path" - Sets the download folder location
 --thread-count=10 - Sets the amount of threads (only valid for downloading playlist)
 --original-cover-size - Downloads the song cover in it's original size
---disable-cache=true - Forces the program to redownload all the songs"#);
+--disable-cache=true - Forces the program to redownload all the songs
+
+scdownload.exe deletecache - Deletes the cache folder."#);
         exit(0);
     }
     if args.len() == 2 {
         match args.get(1).unwrap().as_str() {
+            "deletecache" => {
+                let mut cache_dir = env::temp_dir();
+                cache_dir.push("SCDownloader");
+                if Path::is_dir(&cache_dir) {
+                    std::fs::remove_dir_all(&cache_dir).unwrap();
+                    println!("Cache folder deleted successfully");
+                } else {
+                    println!("No cache folder found");
+                }
+                exit(0);
+            }
             "track" => {
                 println!(r#"SCDownload - Made by Zeunig
 
@@ -212,7 +225,7 @@ fn main() {
     let mut arguments = additional_argument_helper(&args);
     arguments.temp_dir.push("SCDownloader");
     let client_id: String = get_client_id();
-    logging(logging::Severities::DEBUG, format!(r#"Config : 
+    logging(logging::Severities::INFO, format!(r#"Config : 
 - Disable cache : {}
 - Temp directory : {}
 - Download directory : {}
@@ -306,7 +319,6 @@ fn main() {
             headers.insert("Sec-GPC", "1".parse().unwrap());
             headers.insert("Connection", "keep-alive".parse().unwrap());
             let r = req.get(format!("https://soundcloud.com/{}",arg2)).headers(headers.clone()).send().unwrap().text().unwrap();
-            println!("{}",r);
             let reg = Regex::new(r#"content="soundcloud://users:([0-9]*?)""#).unwrap();
             let uid = reg.find(&r).unwrap()
             .as_str()

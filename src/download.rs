@@ -228,7 +228,7 @@ fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool
                 let mut oo = OpenOptions::new().read(true).open(path).unwrap();
                 oo.read_to_end(&mut buffer).unwrap();
             }
-            download_dir.push("temp.mp4");
+            download_dir.push(format!("temp_{}.mp4", sanitize_song_name(&song.name)));
             let mut oo = OpenOptions::new().write(true).create(true).truncate(true).open(&download_dir).unwrap();
             oo.write_all(&buffer).unwrap();
             let mut convert = FfmpegCommand::new();
@@ -239,8 +239,10 @@ fn download(req: Client, song_uri: String, arguments: &Arguments, is_track: bool
             convert.spawn().unwrap().wait().unwrap();
             let final_dir = download_dir.clone();
             download_dir.pop();
-            download_dir.push("temp.mp4");
-            std::fs::remove_file(download_dir).unwrap();
+            download_dir.push(format!("temp_{}.mp4", sanitize_song_name(&song.name)));
+            if let Err(_) = std::fs::remove_file(&download_dir) {
+                logging(Severities::ERROR, format!("Failed to delete temporary file at path : {:?}",&download_dir.to_str()));
+            }
             add_metadata(song, &mut temp_dir, &final_dir);
             },
         FileType::Undefined => {
@@ -384,8 +386,20 @@ fn download_audio(song: &mut Song, arguments: &Arguments, req: &Client, temp_dir
                 logging(Severities::WARNING, format!("No download link found on song, trying next download method : {}",&song.name));
                 continue;
             }
-            logging(Severities::DEBUG, format!("Parsed URL : {}", &r[8..r.len()-19]));
-            let r = req.get(&r[8..r.len()-19]).headers(headers.clone()).send().unwrap().text().unwrap();
+            let url_re = Regex::new(r#"\{"url":"(.*?)".*?}"#).unwrap();
+            let url_captures = url_re.captures(&r);
+            let mut url;
+            if let Some(url_captured_some) = url_captures {
+                url = url_captured_some.get(1).unwrap().as_str();
+            }else {
+                url = &r[8..r.len()-2];
+            }
+            logging(Severities::DEBUG, format!("Parsed URL : {}", url));
+            let mut r = req.get(url).headers(headers.clone()).send().unwrap().text().unwrap();
+            if r.contains("Forbidden") {
+                url = &r[8..r.len()-19];
+                r = req.get(url).headers(headers.clone()).send().unwrap().text().unwrap();
+            }
             logging(Severities::INFO, format!("Valid download URL found, downloading song {}",song.name));
             let re = Regex::new(r#"(https://cf-hls-media.sndcdn.com/media/.*?|https://playback.media-streaming.soundcloud.cloud.*?)\n"#).unwrap();
             let links = re.captures_iter(&r);
